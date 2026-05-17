@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Haunted Gilded Mirror - Vibe Coding</title>
+    <title>Пла́чущее🪞зе́ркало</title>
     <style>
         html, body {
             margin: 0;
             padding: 0;
-            background-color: #65067b; /* 統一魔幻紫背景 */
+            background-color: #65067b; /* 紫背景 */
             width: 100%;
             height: 100%;
             overflow: hidden;
@@ -104,8 +104,8 @@
 <body>
 
     <div id="onboarding-overlay">
-        <button id="start-btn">Face the Mirror</button>
-        <div id="status-tip">點擊以喚醒魔鏡並同步授權相機與陀螺儀</div>
+        <button id="start-btn">Пла́чущее зе́ркало</button>
+        <div id="status-tip">𝔰𝔥𝔞𝔨𝔢 𝔱𝔥𝔢 𝔪𝔦𝔯𝔯𝔬𝔯</div>
     </div>
     
     <div id="mirror-wrapper">
@@ -199,7 +199,7 @@
                             vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
                             vec2 centerScaled = center * vec2(uCanvasAspect, 1.0);
                             float dist = distance(uvScaled, centerScaled);
-                            float maxRadius = age * 0.7; // 稍微擴大最大半徑，呈現慢速蔓延
+                            float maxRadius = age * 1.1; // 稍微擴大最大半徑，呈現慢速蔓延
                             
                             if (dist < maxRadius) {
                                 float progress = dist / maxRadius;
@@ -211,7 +211,7 @@
                                 vec2 dir = uvScaled - centerScaled;
                                 if (length(dir) > 0.0001) {
                                     // 【核心修正】幅度大幅增加（0.015 -> 0.055），呈现激盪的大幅度魔幻拉扯
-                                    displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.055;
+                                    displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.1;
                                     // 【核心修正】縮小光影反差，呈現有機水質柔和感，避免死黑
                                     shadowHighlight += wave * intensity * 0.065;
                                 }
@@ -283,7 +283,7 @@
                 video.srcObject = stream;
                 await video.play();
 
-                statusTip.innerText = "正在激活陀螺儀...";
+                statusTip.innerText = "正在啟動陀螺儀...";
                 if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
                     const permission = await DeviceMotionEvent.requestPermission();
                     if (permission === 'granted') initGyroscope();
@@ -354,7 +354,7 @@
             // 【核心修正】更新滑鼠 / 手機虛擬游標 /背景自動漣漪消逝速度 (從 1.45 大幅下修至 0.65，使水波更優雅悠長)
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    ripples[i].age += delta * 0.65; // 調慢老化速度，呈現沉穩體感
+                    ripples[i].age += delta * 1.1; // 調慢老化速度，呈現沉穩體感
                     if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
@@ -364,7 +364,7 @@
             }
             
             // 【核心修正】和諧背景自動波紋有機觸發器
-            // 使用 clock 的時間戳，約 1.2 至 2.0 秒隨機自動泛起一個微弱波紋
+            // 使用 clock 的時間，約 1.2 至 2.0 秒隨機自動泛起一個微弱波紋
             if (now - lastAutoRippleTime > (1200 + Math.random() * 800)) {
                 // 選取鏡面範圍內的隨機座標 (0.3 ~ 0.7 橢圓區間內)
                 const randX = THREE.MathUtils.randFloat(0.35, 0.65);
@@ -380,7 +380,7 @@
             renderer.render(scene, camera);
         }
 
-        // 彻底阻斷瀏覽器原生手勢
+        // 阻斷瀏覽器原生手勢
         document.addEventListener('gesturestart', (e) => e.preventDefault());
         document.addEventListener('touchstart', (e) => {
             if (e.touches.length > 1) e.preventDefault();
