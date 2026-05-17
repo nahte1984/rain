@@ -5,11 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Haunted Gilded Mirror - Vibe Coding</title>
     <style>
-        /* 全局魔幻紫，完全封鎖手勢與連擊放大 */
         html, body {
             margin: 0;
             padding: 0;
-            background-color: #65067b;
+            background-color: #65067b; /* 統一魔幻紫大背景 */
             width: 100%;
             height: 100%;
             overflow: hidden;
@@ -23,7 +22,7 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        /* 鏡子 1:2 完美容器 */
+        /* 1:2 鏡子黃金比例容器 */
         #mirror-wrapper {
             position: relative;
             height: 100vh;
@@ -35,7 +34,7 @@
             touch-action: none;
         }
 
-        /* 頂層金框 */
+        /* 頂層金色雕花框 */
         #mirror-image {
             position: absolute;
             top: 0;
@@ -47,20 +46,20 @@
             z-index: 10;
         }
 
-        /* WebGL 畫布：精準微調定位，使其完美滑入鏡面圈圈 */
+        /* WebGL 畫布：【全面擴大】精準向外推展邊界，確保完美塞入內軌，絕不露白露黑 */
         #webgl-canvas {
             position: absolute;
-            top: 14.0%;
-            left: 13.0%;
-            width: 74.0%;
-            height: 35.5%;
+            top: 11.0%;
+            left: 10.5%;
+            width: 79.0%;
+            height: 41.0%;
             border-radius: 50%;
-            z-index: 5;
+            z-index: 5; /* 隱入金框下方 */
             background-color: #65067b;
             touch-action: none;
         }
 
-        /* 「Face the Mirror」互動初始遮罩 */
+        /* 互動啟動遮罩 */
         #onboarding-overlay {
             position: fixed;
             top: 0;
@@ -73,11 +72,11 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            transition: opacity 0.6s ease;
+            transition: opacity 0.5s ease;
         }
 
         #start-btn {
-            padding: 16px 36px;
+            padding: 16px 40px;
             font-size: 1.2rem;
             font-weight: bold;
             color: #65067b;
@@ -86,12 +85,11 @@
             border-radius: 30px;
             cursor: pointer;
             box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-            transition: transform 0.2s, background-color 0.2s;
+            transition: transform 0.2s;
         }
 
         #start-btn:active {
             transform: scale(0.95);
-            background-color: #e0e0e0;
         }
 
         #status-tip {
@@ -99,8 +97,6 @@
             color: rgba(255,255,255,0.7);
             font-size: 0.9rem;
             text-align: center;
-            padding: 0 20px;
-            line-height: 1.5;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -109,7 +105,7 @@
 
     <div id="onboarding-overlay">
         <button id="start-btn">Face the Mirror</button>
-        <div id="status-tip">點擊以喚醒魔鏡並同步相機與陀螺儀權限</div>
+        <div id="status-tip">點擊以喚醒魔鏡並同步授權相機與陀螺儀</div>
     </div>
     
     <div id="mirror-wrapper">
@@ -123,7 +119,7 @@
         const statusTip = document.getElementById('status-tip');
         const canvas = document.getElementById('webgl-canvas');
         
-        // 1. 初始化 Three.js
+        // 1. 初始化 Three.js 場景
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
@@ -136,38 +132,39 @@
             }
         }
 
-        // 2. 視訊設定與長寬比偵測
+        // 2. 視訊設定與非失真比例檢測
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
         video.muted = true;
 
-        let videoAspect = 1.777; // 預設 16:9 比例
+        let videoAspect = 1.777; 
         video.addEventListener('loadedmetadata', () => {
             videoAspect = video.videoWidth / video.videoHeight;
-            if (material) {
-                material.uniforms.uVideoAspect.value = videoAspect;
-            }
+            if (material) material.uniforms.uVideoAspect.value = videoAspect;
         });
 
         const videoTexture = new THREE.VideoTexture(video);
         videoTexture.minFilter = THREE.LinearFilter;
         videoTexture.magFilter = THREE.LinearFilter;
 
-        // 3. 擴張水波紋快取矩陣至 50 個，防止新產生的波紋覆蓋舊波紋
-        const maxRipples = 50;
+        // 3. 滑鼠微小波紋資料結構 (精簡至 6 個，維持輕量互動)
+        const maxRipples = 6;
         const ripples = Array(maxRipples).fill(null).map(() => ({ x: 0, y: 0, age: 0, intensity: 0 }));
         const rippleData = new Float32Array(maxRipples * 4); 
         let rippleIndex = 0;
         let lastX = 0, lastY = 0;
 
-        // 4. 客製化 Shader 材質 (修正壓扁、縮小扭曲、縮小反差)
+        // 4. 全新流體力學著色器 (獨佔大巨浪 + 餘波演算)
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uVideoTex: { value: videoTexture },
                 uRipples: { value: rippleData },
                 uCanvasAspect: { value: 1.0 },
-                uVideoAspect: { value: 1.777 }
+                uVideoAspect: { value: 1.777 },
+                // 專門留給手機晃動大水波的全局控制
+                uGyroAge: { value: 0.0 },
+                uGyroIntensity: { value: 0.0 }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -178,57 +175,71 @@
             `,
             fragmentShader: `
                 uniform sampler2D uVideoTex;
-                uniform vec4 uRipples[50]; // 支援 50 個獨立水波
+                uniform vec4 uRipples[6]; 
                 uniform float uCanvasAspect;
                 uniform float uVideoAspect;
+                uniform float uGyroAge;
+                uniform float uGyroIntensity;
                 varying vec2 vUv;
 
                 void main() {
                     vec2 uv = vUv;
                     vec2 displacedUv = uv;
-                    
                     float shadowHighlight = 0.0;
                     
-                    // 計算 50 個波紋的物理疊加
-                    for(int i = 0; i < 50; i++) {
+                    // 【A. 手機晃動：全鏡面獨佔巨浪與餘波模擬】
+                    if (uGyroAge > 0.0 && uGyroAge < 1.0) {
+                        vec2 center = vec2(0.5, 0.5); // 從鏡面正中央炸開
+                        vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
+                        vec2 centerScaled = center * vec2(uCanvasAspect, 1.0);
+                        float dist = distance(uvScaled, centerScaled);
+                        
+                        // 使用多重干涉正弦與餘弦，調配出覆蓋全場的大浪與細密餘波 (Residual Waves)
+                        float mainWave = sin(dist * 14.0 - uGyroAge * 28.0);
+                        float harmonicWave = cos(dist * 26.0 - uGyroAge * 14.0) * 0.4;
+                        float totalWave = mainWave + harmonicWave;
+                        
+                        // 優雅、自然的能量衰減曲線 (Time-based Exponential Decay)
+                        float decay = pow(1.0 - uGyroAge, 1.8);
+                        float waveIntensity = uGyroIntensity * decay;
+                        
+                        vec2 dir = uvScaled - centerScaled;
+                        if (length(dir) > 0.0001) {
+                            // 柔和的波紋拉扯，不產生硬刺
+                            displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * totalWave * waveIntensity * 0.025;
+                            // 縮小反差：平滑微弱的明暗變調，極致自然
+                            shadowHighlight += totalWave * waveIntensity * 0.06;
+                        }
+                    }
+                    
+                    // 【B. 桌機版滑鼠局部微波】
+                    for(int i = 0; i < 6; i++) {
                         float age = uRipples[i].z;
                         if (age > 0.0 && age < 1.0) {
                             vec2 center = uRipples[i].xy;
-                            
                             vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
                             vec2 centerScaled = center * vec2(uCanvasAspect, 1.0);
-                            
                             float dist = distance(uvScaled, centerScaled);
-                            float maxRadius = age * 0.6; // 優雅的擴散半徑
+                            float maxRadius = age * 0.6;
                             
                             if (dist < maxRadius) {
                                 float progress = dist / maxRadius;
-                                
-                                // 溫和細緻的有機水波紋公式
-                                float wave = sin((dist - maxRadius) * 40.0) * cos((dist - maxRadius) * 15.0);
-                                
-                                // 平滑的邊緣淡入淡出衰減
-                                float intensity = uRipples[i].w * pow(1.0 - age, 2.0) * min(smoothstep(0.0, 0.2, progress), smoothstep(1.0, 0.7, progress));
+                                float wave = sin((dist - maxRadius) * 35.0);
+                                float intensity = uRipples[i].w * pow(1.0 - age, 1.5) * smoothstep(0.0, 0.2, progress);
                                 
                                 vec2 dir = uvScaled - centerScaled;
                                 if (length(dir) > 0.0001) {
-                                    // 【核心修正】降低扭曲幅度（降至 0.015），呈現優雅的水質柔和感
-                                    float distortion = wave * intensity * 0.015;
-                                    displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * distortion;
-                                    
-                                    // 【核心修正】極大幅度縮小亮暗反差（降至 0.08），避免出現不自然的死黑陰影
-                                    shadowHighlight += wave * intensity * 0.08;
+                                    displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.012;
+                                    shadowHighlight += wave * intensity * 0.03;
                                 }
                             }
                         }
                     }
                     
                     displacedUv = clamp(displacedUv, 0.002, 0.998);
+                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像修正
                     
-                    // 鏡像修正（讓照鏡子的體驗符合直覺）
-                    displacedUv.x = 1.0 - displacedUv.x;
-                    
-                    // 【核心修正】著色器內置 Object-Fit Cover 演算法，完美防止相機被壓扁
+                    // 內置不變形 Object-Fit Cover 演算法
                     vec2 finalVideoUv = displacedUv;
                     if (uCanvasAspect > uVideoAspect) {
                         float ratio = uVideoAspect / uCanvasAspect;
@@ -240,9 +251,8 @@
                     
                     vec4 texColor = texture2D(uVideoTex, finalVideoUv);
                     
-                    // 混入極其自然的波紋微弱光影
+                    // 柔和疊加光影調變
                     vec3 rgb = texColor.rgb + vec3(shadowHighlight);
-                    
                     gl_FragColor = vec4(rgb, 1.0);
                 }
             `
@@ -252,88 +262,67 @@
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
 
-        // 5. 波紋觸發與緩慢衰減邏輯
-        function triggerRipple(canvasX, canvasY, intensityMod = 1.0, isGyro = false) {
+        // 5. 互動觸發器
+        function triggerMouseRipple(canvasX, canvasY, intensityMod = 1.0) {
             let x = canvasX / canvas.clientWidth;
             let y = 1.0 - (canvasY / canvas.clientHeight);
 
-            if (isGyro) {
-                x = 0.5;
-                y = 0.5;
-            }
-
             const dist = Math.hypot(x - lastX, y - lastY);
-            // 降低觸發間距敏感度，配合高容量緩衝區，使波紋自然共存
-            if (dist > 0.01 || intensityMod > 1.1 || isGyro) {
-                ripples[rippleIndex] = {
-                    x,
-                    y,
-                    age: 0.01,
-                    intensity: (isGyro ? 1.4 : intensityMod) * 0.8
-                };
-                rippleIndex = (rippleIndex + 1) % maxRipples; // 輪替使用 50 個暫存槽
-                if (!isGyro) {
-                    lastX = x;
-                    lastY = y;
-                }
+            if (dist > 0.02 || intensityMod > 1.1) {
+                ripples[rippleIndex] = { x, y, age: 0.01, intensity: intensityMod * 0.6 };
+                rippleIndex = (rippleIndex + 1) % maxRipples;
+                lastX = x;
+                lastY = y;
             }
         }
 
-        // --- 滑鼠互動監聽（僅限 Canvas 內部） ---
+        // --- 滑鼠監聽事件 ---
         window.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                triggerRipple(e.clientX - rect.left, e.clientY - rect.top, 1.0);
+                triggerMouseRipple(e.clientX - rect.left, e.clientY - rect.top, 1.0);
             }
         });
 
         window.addEventListener('mousedown', (e) => {
             const rect = canvas.getBoundingClientRect();
             if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
-                triggerRipple(e.clientX - rect.left, e.clientY - rect.top, 1.5);
+                triggerMouseRipple(e.clientX - rect.left, e.clientY - rect.top, 1.5);
             }
         });
 
-        // 6. 依序異步授權流程（Face the Mirror 按鈕點擊）
+        // --- 授權序向流處理 ---
         startBtn.addEventListener('click', async () => {
             startBtn.style.display = 'none';
             statusTip.innerText = "正在請求相機權限...";
 
             try {
-                // 第一步：請求相機權限
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } 
                 });
                 video.srcObject = stream;
                 await video.play();
 
-                // 第二步：請求陀螺儀權限（針對 iOS 設備）
-                statusTip.innerText = "正在請求陀螺儀感測權限...";
+                statusTip.innerText = "正在激活陀螺儀...";
                 if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
                     const permission = await DeviceMotionEvent.requestPermission();
-                    if (permission === 'granted') {
-                        initGyroscope();
-                    } else {
-                        statusTip.innerText = "未授予陀螺儀權限，將僅啟用滑鼠互動。";
-                    }
+                    if (permission === 'granted') initGyroscope();
                 } else {
-                    // Android 或一般桌面瀏覽器
                     initGyroscope();
                 }
 
-                // 成功後隱藏遮罩層
                 overlay.style.opacity = 0;
-                setTimeout(() => overlay.style.removeProperty, 600);
+                setTimeout(() => overlay.remove(), 500);
                 resizeCanvas();
 
             } catch (err) {
                 console.error(err);
                 startBtn.style.display = 'block';
-                statusTip.innerText = "啟動失敗，請確保已允許相機存取權限。";
+                statusTip.innerText = "授權失敗，請確保環境支援並允許鏡頭存取。";
             }
         });
 
-        // 陀螺儀動態偵測
+        // --- 陀螺儀動態捕捉：引發全局大波浪 ---
         let lastShakeTime = 0;
         let lastAccX = 0, lastAccY = 0;
 
@@ -347,25 +336,26 @@
                 lastAccY = acc.y;
 
                 const now = Date.now();
-                // 溫和地觸發晃動波紋
-                if (change > 6.5 && (now - lastShakeTime > 400)) {
-                    triggerRipple(0, 0, 1.2, true);
+                // 偵測到手機晃動，直接重置全局大水波
+                if (change > 6.0 && (now - lastShakeTime > 400)) {
+                    material.uniforms.uGyroAge.value = 0.01; // 重啟巨浪
+                    material.uniforms.uGyroIntensity.value = 1.3; // 賦予充沛波動能量
                     lastShakeTime = now;
                 }
             });
         }
 
-        // 7. 渲染循環（Render Loop）
+        // 6. 核心排程循環 (Render Loop)
         const clock = new THREE.Clock();
 
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
             
+            // A. 更新滑鼠局部漣漪 (正常自然速度)
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    // 【核心修正】大幅降低波紋的老化速度（改為 0.18），使水波更為緩慢、深沉且悠長
-                    ripples[i].age += delta * 0.18; 
+                    ripples[i].age += delta * 0.75; // 正常水速
                     if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
@@ -374,12 +364,24 @@
                 rippleData[i*4 + 3] = ripples[i].intensity;
             }
             
+            // B. 更新手機搖晃全局巨浪 (【核心修正】調配到最自然的消逝時間)
+            if (material.uniforms.uGyroAge.value > 0.0) {
+                material.uniforms.uGyroAge.value += delta * 0.65; // 調高速度係數，使其自然優雅地收尾
+                if (material.uniforms.uGyroAge.value >= 1.0) {
+                    material.uniforms.uGyroAge.value = 0.0;
+                    material.uniforms.uGyroIntensity.value = 0.0;
+                }
+            }
+            
             material.uniforms.uRipples.value = rippleData;
             renderer.render(scene, camera);
         }
 
-        // 阻止 iOS 原生手勢放大
+        // 徹底阻斷 iOS 原生雙擊與縮放手勢
         document.addEventListener('gesturestart', (e) => e.preventDefault());
+        document.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 1) e.preventDefault();
+        }, { passive: false });
 
         window.addEventListener('resize', resizeCanvas);
         animate();
