@@ -95,7 +95,7 @@
         #status-tip {
             margin-top: 20px;
             color: rgba(255,255,255,0.7);
-            font-size: 0.9rem;
+            font-size: 1.3rem;
             text-align: center;
         }
     </style>
@@ -105,7 +105,7 @@
 
     <div id="onboarding-overlay">
         <button id="start-btn">Пла́чущее зе́ркало</button>
-        <div id="status-tip">𝔰𝔥𝔞𝔨𝔢 𝔱𝔥𝔢 𝔪𝔦𝔯𝔯𝔬𝔯</div>
+        <div id="status-tip">ѕнαкє тнє мιяяσя</div>
     </div>
     
     <div id="mirror-wrapper">
@@ -199,7 +199,7 @@
                             vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
                             vec2 centerScaled = center * vec2(uCanvasAspect, 1.0);
                             float dist = distance(uvScaled, centerScaled);
-                            float maxRadius = age * 1.1; // 稍微擴大最大半徑，呈現慢速蔓延
+                            float maxRadius = age * 1.8; // 稍微擴大最大半徑，呈現慢速蔓延
                             
                             if (dist < maxRadius) {
                                 float progress = dist / maxRadius;
@@ -210,7 +210,7 @@
                                 
                                 vec2 dir = uvScaled - centerScaled;
                                 if (length(dir) > 0.0001) {
-                                    // 【核心修正】幅度大幅增加（0.015 -> 0.055），呈现激盪的大幅度魔幻拉扯
+                                    // 【核心修正】幅度大幅增加（0.015 -> 0.055），激盪的大幅度魔幻拉扯
                                     displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.1;
                                     // 【核心修正】縮小光影反差，呈現有機水質柔和感，避免死黑
                                     shadowHighlight += wave * intensity * 0.065;
@@ -354,7 +354,7 @@
             // 【核心修正】更新滑鼠 / 手機虛擬游標 /背景自動漣漪消逝速度 (從 1.45 大幅下修至 0.65，使水波更優雅悠長)
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    ripples[i].age += delta * 1.1; // 調慢老化速度，呈現沉穩體感
+                    ripples[i].age += delta * 3.1; // 調慢老化速度，呈現沉穩體感
                     if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
