@@ -75,7 +75,7 @@
             transition: opacity 0.5s ease;
         }
 
-        /* 【修改】套用古典優雅的有襯線字型 */
+        /* 套用古典優雅的有襯線字型 */
         #start-btn {
             padding: 16px 40px;
             font-size: 1.2rem;
@@ -94,7 +94,7 @@
             transform: scale(0.95);
         }
 
-        /* 【修改】套用古典優雅的有襯線字型 */
+        /* 套用古典優雅的有襯線字型 */
         #status-tip {
             margin-top: 20px;
             color: rgba(255,255,255,0.7);
@@ -275,9 +275,31 @@
             }
         });
 
-        // --- 授權流程 ---
+        // --- 授權流程（核心重構：優先取得陀螺儀，防止手勢 token 過期） ---
         startBtn.addEventListener('click', async () => {
             startBtn.style.display = 'none';
+            statusTip.innerText = "Initializing gyroscope...";
+
+            let gyroGranted = false;
+
+            try {
+                // 【終極修復】趁著點擊瞬間手勢最為新鮮，最優先請求陀螺儀權限！
+                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                    const permission = await DeviceMotionEvent.requestPermission();
+                    if (permission === 'granted') {
+                        gyroGranted = true;
+                    }
+                } else {
+                    // Android 或一般桌面 Chrome 瀏覽器不需手動 request 則預設允許
+                    gyroGranted = true;
+                }
+            } catch (gyroErr) {
+                console.error("Gyroscope error:", gyroErr);
+                // 桌面版 Chrome 或特定內建瀏覽器若阻擋 method 報錯，進行安全降級
+                gyroGranted = true; 
+            }
+
+            // 隨後緊接著請求相機權限（相機權限本身不受點擊手勢過期的硬性限制）
             statusTip.innerText = "Requesting Camera...";
 
             try {
@@ -287,11 +309,8 @@
                 video.srcObject = stream;
                 await video.play();
 
-                statusTip.innerText = "Initializing gyroscope...";
-                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
-                    const permission = await DeviceMotionEvent.requestPermission();
-                    if (permission === 'granted') initGyroscope();
-                } else {
+                // 只要陀螺儀狀態沒被嚴格拒絕，就正常初始化
+                if (gyroGranted) {
                     initGyroscope();
                 }
 
@@ -364,13 +383,12 @@
                 rippleData[i*4 + 3] = ripples[i].intensity;
             }
             
-            // 【核心修正】背景自動有機水波觸發機制
-            // 修改為 2.0 到 3.1 秒（2000ms 到 3100ms）隨機自動泛起波紋
+            // 【保留您的核心設定】背景自動有機水波觸發機制（修正為 2.0 至 3.1 秒）
             if (now - lastAutoRippleTime > (2000 + Math.random() * 1100)) {
                 
-                // 【核心修正】起始座標更改：利用極座標公式，將波源鎖死在鏡子最邊緣的圓周軌道上
+                // 利用極座標公式，將自動波源鎖死在鏡子最邊緣的圓周軌道上
                 const randomAngle = Math.random() * Math.PI * 2;
-                const edgeRadius = 0.48; // 緊貼 Canvas 的橢圓橢圓邊緣內軌
+                const edgeRadius = 0.48; // 緊貼 Canvas 的橢圓邊緣內軌
                 const randX = 0.5 + Math.cos(randomAngle) * edgeRadius;
                 const randY = 0.5 + Math.sin(randomAngle) * edgeRadius;
                 
