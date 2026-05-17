@@ -354,7 +354,7 @@
             // 【核心修正】更新滑鼠 / 手機虛擬游標 /背景自動漣漪消逝速度 (從 1.45 大幅下修至 0.65，使水波更優雅悠長)
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    ripples[i].age += delta * 3.1; // 調慢老化速度，呈現沉穩體感
+                    ripples[i].age += delta * 0.31; // 調慢老化速度，呈現沉穩體感
                     if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
