@@ -75,6 +75,7 @@
             transition: opacity 0.5s ease;
         }
 
+        /* 【修改】套用古典優雅的有襯線字型 */
         #start-btn {
             padding: 16px 40px;
             font-size: 1.2rem;
@@ -86,17 +87,20 @@
             cursor: pointer;
             box-shadow: 0 10px 25px rgba(0,0,0,0.2);
             transition: transform 0.2s;
+            font-family: "Georgia", "Times New Roman", Times, serif;
         }
 
         #start-btn:active {
             transform: scale(0.95);
         }
 
+        /* 【修改】套用古典優雅的有襯線字型 */
         #status-tip {
             margin-top: 20px;
             color: rgba(255,255,255,0.7);
             font-size: 1.3rem;
             text-align: center;
+            font-family: "Georgia", "Times New Roman", Times, serif;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -161,10 +165,10 @@
         let lastShakeTimeTrigger = 0;
         let lastAccX = 0, lastAccY = 0;
 
-        // 【核心修正】背景自動觸發流體系統
+        // 背景自動觸發流體系統
         let lastAutoRippleTime = 0;
 
-        // 4. 連續流體動態著色器 (更大幅度、和諧餘波演算)
+        // 4. 連續流體動態著色器 (保留您微調過的 1.8 擴散半徑與 0.1 超大幅度)
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uVideoTex: { value: videoTexture },
@@ -199,7 +203,7 @@
                             vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
                             vec2 centerScaled = center * vec2(uCanvasAspect, 1.0);
                             float dist = distance(uvScaled, centerScaled);
-                            float maxRadius = age * 1.8; // 稍微擴大最大半徑，呈現慢速蔓延
+                            float maxRadius = age * 1.8; // 保留您設定的 1.8 慢速大蔓延半徑
                             
                             if (dist < maxRadius) {
                                 float progress = dist / maxRadius;
@@ -210,9 +214,9 @@
                                 
                                 vec2 dir = uvScaled - centerScaled;
                                 if (length(dir) > 0.0001) {
-                                    // 【核心修正】幅度大幅增加（0.015 -> 0.055），激盪的大幅度魔幻拉扯
+                                    // 保留您修改的 0.1 深度魔幻拉扯幅度
                                     displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.1;
-                                    // 【核心修正】縮小光影反差，呈現有機水質柔和感，避免死黑
+                                    // 縮小光影反差，呈現有機水質柔和感
                                     shadowHighlight += wave * intensity * 0.065;
                                 }
                             }
@@ -220,7 +224,7 @@
                     }
                     
                     displacedUv = clamp(displacedUv, 0.002, 0.998);
-                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像
+                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像修正
                     
                     // 內置不變形 Object-Fit Cover
                     vec2 finalVideoUv = displacedUv;
@@ -302,13 +306,12 @@
             }
         });
 
-        // --- 陀螺儀動態捕捉：數據像滑鼠游標一樣游移，觸發普通波紋 ---
+        // --- 陀螺儀動態捕捉 ---
         function initGyroscope() {
             window.addEventListener('devicemotion', (e) => {
                 const acc = e.accelerationIncludingGravity;
                 if (!acc) return;
 
-                // 即時位移向量差
                 const deltaX = acc.x - lastAccX;
                 const deltaY = acc.y - lastAccY;
                 const change = Math.abs(deltaX) + Math.abs(deltaY);
@@ -318,14 +321,12 @@
 
                 const now = Date.now();
                 
-                // 映射物理偏移：根據手機的傾斜向量（加速度），絲滑地插值計算虛擬游標目標。
                 targetCenterX = 0.5 - THREE.MathUtils.clamp(acc.x * 0.042, -0.38, 0.38);
                 targetCenterY = 0.5 - THREE.MathUtils.clamp(acc.y * 0.042, -0.38, 0.38);
 
                 virtualGyroCursor.x = virtualGyroCursor.x * 0.84 + targetCenterX * 0.16;
                 virtualGyroCursor.y = virtualGyroCursor.y * 0.84 + targetCenterY * 0.16;
 
-                // 超高靈敏度觸發 普通波紋（用游標滑動距離觸發）
                 const distMoved = Math.hypot(virtualGyroCursor.x - lastVirtualCursorX, virtualGyroCursor.y - lastVirtualCursorY);
                 lastVirtualCursorX = virtualGyroCursor.x;
                 lastVirtualCursorY = virtualGyroCursor.y;
@@ -333,9 +334,9 @@
                 if (distMoved > 0.008 && (now - lastShakeTimeTrigger > 50)) { 
                     const rect = canvas.getBoundingClientRect();
                     const canvasX = virtualGyroCursor.x * rect.width;
-                    const canvasY = (1.0 - virtualGyroCursor.y) * rect.height; // Y 軸翻轉
+                    const canvasY = (1.0 - virtualGyroCursor.y) * rect.height; 
 
-                    const intensity = 0.9 + change * 0.15; // 映射晃動變化率到波紋強度
+                    const intensity = 0.9 + change * 0.15; 
                     triggerMouseRipple(canvasX, canvasY, intensity);
                     lastShakeTimeTrigger = now;
                 }
@@ -344,17 +345,17 @@
 
         // 6. 核心排程循環 (物理模擬循環)
         const clock = new THREE.Clock();
-        let targetCenterX = 0.5, targetCenterY = 0.5; // 手機游標插值目標
+        let targetCenterX = 0.5, targetCenterY = 0.5; 
 
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            const now = clock.getElapsedTime() * 1000; // 使用 clocks 的時間，防止瀏覽器切換標籤導致計時器異常
+            const now = clock.getElapsedTime() * 1000; 
             
-            // 【核心修正】更新滑鼠 / 手機虛擬游標 /背景自動漣漪消逝速度 (從 1.45 大幅下修至 0.65，使水波更優雅悠長)
+            // 更新所有水波的老化消逝速度（保留您調慢至 0.31 的絲滑優雅體感）
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    ripples[i].age += delta * 0.31; // 調慢老化速度，呈現沉穩體感
+                    ripples[i].age += delta * 0.31; 
                     if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
@@ -363,14 +364,17 @@
                 rippleData[i*4 + 3] = ripples[i].intensity;
             }
             
-            // 【核心修正】和諧背景自動波紋有機觸發器
-            // 使用 clock 的時間，約 1.2 至 2.0 秒隨機自動泛起一個微弱波紋
-            if (now - lastAutoRippleTime > (1200 + Math.random() * 800)) {
-                // 選取鏡面範圍內的隨機座標 (0.3 ~ 0.7 橢圓區間內)
-                const randX = THREE.MathUtils.randFloat(0.35, 0.65);
-                const randY = THREE.MathUtils.randFloat(0.35, 0.65);
+            // 【核心修正】背景自動有機水波觸發機制
+            // 修改為 2.0 到 3.1 秒（2000ms 到 3100ms）隨機自動泛起波紋
+            if (now - lastAutoRippleTime > (2000 + Math.random() * 1100)) {
                 
-                // 強度極淡（0.3），受到新的緩慢速度與大幅度設定影響，自然泛起悠長餘韻
+                // 【核心修正】起始座標更改：利用極座標公式，將波源鎖死在鏡子最邊緣的圓周軌道上
+                const randomAngle = Math.random() * Math.PI * 2;
+                const edgeRadius = 0.48; // 緊貼 Canvas 的橢圓橢圓邊緣內軌
+                const randX = 0.5 + Math.cos(randomAngle) * edgeRadius;
+                const randY = 0.5 + Math.sin(randomAngle) * edgeRadius;
+                
+                // 觸發邊緣微弱波紋，隨後會以 0.31 的優雅速度向內緩緩蔓延
                 ripples[rippleIndex] = { x: randX, y: randY, age: 0.01, intensity: 0.3 };
                 rippleIndex = (rippleIndex + 1) % maxRipples;
                 lastAutoRippleTime = now;
