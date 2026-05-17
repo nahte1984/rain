@@ -98,7 +98,7 @@
         #status-tip {
             margin-top: 20px;
             color: rgba(255,255,255,0.7);
-            font-size: 1.3rem;
+            font-size: 0.9rem;
             text-align: center;
             font-family: "Georgia", "Times New Roman", Times, serif;
         }
@@ -108,7 +108,7 @@
 <body>
 
     <div id="onboarding-overlay">
-        <button id="start-btn">Пла́чущее зе́ркало</button>
+        <button id="start-btn">the Crying Mirror</button>
         <div id="status-tip">Shake the Mirror</div>
     </div>
     
@@ -278,7 +278,7 @@
         // --- 授權流程 ---
         startBtn.addEventListener('click', async () => {
             startBtn.style.display = 'none';
-            statusTip.innerText = "正在請求相機權限...";
+            statusTip.innerText = "Requesting Camera...";
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -287,7 +287,7 @@
                 video.srcObject = stream;
                 await video.play();
 
-                statusTip.innerText = "正在啟動陀螺儀...";
+                statusTip.innerText = "Initializing gyroscope...";
                 if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
                     const permission = await DeviceMotionEvent.requestPermission();
                     if (permission === 'granted') initGyroscope();
@@ -302,7 +302,7 @@
             } catch (err) {
                 console.error(err);
                 startBtn.style.display = 'block';
-                statusTip.innerText = "授權失敗，請確保環境支援並允許鏡頭存取。";
+                statusTip.innerText = "Authorization failed. Please ensure your device supports and allows camera access.";
             }
         });
 
