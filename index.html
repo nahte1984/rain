@@ -5,121 +5,134 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Haunted Gilded Mirror - Vibe Coding</title>
     <style>
-        body {
+        /* 統一整個網頁的背景色為魔幻紫，並置中鏡子 */
+        html, body {
             margin: 0;
             padding: 0;
-            background-color: #65067b; /* 用戶要求的背景色 */
-            overflow: hidden;
-        }
-        #main-container {
-            position: relative;
-            width: 100vw;
-            height: 100vh;
+            background-color: #65067b;
+            width: 100%;
+            height: 100%;
             overflow: hidden;
             display: flex;
             justify-content: center;
             align-items: center;
+            font-family: sans-serif;
         }
-        /* 鏡子圖層：全屏， object-fit: contain， z-index 最高 */
-        #mirror-image {
+
+        /* 建立一個嚴格符合鏡子 1:2 比例的容器 */
+        #mirror-wrapper {
+            position: relative;
             height: 100vh;
-            width: auto;
-            object-fit: contain;
-            pointer-events: none; /* 滑鼠穿透到 Canvas */
-            z-index: 10;
-            position: absolute;
-            top: 0;
+            aspect-ratio: 1 / 2;
+            background-color: #65067b;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
-        /* Canvas 容器： z-index 較低，放在鏡子後面 */
-        #canvas-container {
+
+        /* 鏡子框圖片：置頂層 */
+        #mirror-image {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            display: flex;
-            justify-content: center;
-            z-index: 5;
+            object-fit: contain;
+            pointer-events: none; /* 讓滑鼠點擊可以穿透到下層的 Canvas */
+            z-index: 10;
         }
+
+        /* WebGL Canvas：用百分比精準鎖死在鏡子的黑色鏤空處，並裁切成橢圓 */
         #webgl-canvas {
-            pointer-events: auto; /* 我們會監聽 Canvas 的事件 */
+            position: absolute;
+            top: 16.5%;
+            left: 14.4%;
+            width: 71.2%;
+            height: 32.5%;
+            border-radius: 50%;
+            z-index: 5; /* 放在鏡框圖層之下（如果 mirror.png 中間是透明的，會完美契合） */
+            background-color: #000;
         }
+
         #loading {
             position: fixed;
-            top: 50%;
+            top: 20px;
             left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-family: sans-serif;
-            font-size: 1.2rem;
+            transform: translateX(-50%);
+            color: #fff;
+            background: rgba(0,0,0,0.6);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
             pointer-events: none;
             transition: opacity 0.5s;
-            z-index: 20;
+            z-index: 100;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-    <div id="loading">請允許相機權限...</div>
-    <div id="main-container">
-        <img id="mirror-image" src="mirror.png" alt="gilded mirror frame">
-        <div id="canvas-container">
-            <canvas id="webgl-canvas"></canvas>
-        </div>
+    <div id="loading">請允許相機權限以啟動魔鏡...</div>
+    
+    <div id="mirror-wrapper">
+        <img id="mirror-image" src="mirror.png" alt="Gilded Mirror Frame">
+        <canvas id="webgl-canvas"></canvas>
     </div>
 
     <script>
         const loadingEl = document.getElementById('loading');
+        const canvas = document.getElementById('webgl-canvas');
         
-        // --- Three.js 初始化 (滿版 Canvas) ---
+        // 1. 初始化 Three.js 場景與正交相機
         const scene = new THREE.Scene();
         const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+        
+        // 根據 Canvas 的實際 CSS 尺寸來設定渲染解析度
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            renderer.setSize(rect.width, rect.height, false);
+            if (material) {
+                material.uniforms.uAspect.value = rect.width / rect.height;
+            }
+        }
 
-        // --- 撈取 Webcam (鏡像模式) ---
+        // 2. 獲取相機視訊串流
         const video = document.createElement('video');
         video.autoplay = true;
         video.playsInline = true;
         video.muted = true;
 
-        navigator.mediaDevices.getUserMedia({ video: { width: {理想: 1280}, height: {理想: 720} } })
+        navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } } })
             .then(stream => {
                 video.srcObject = stream;
                 video.play();
-                loadingEl.style.opacity = 0;
+                loadingEl.innerText = "點擊畫面任意處可同步連動手機陀螺儀 📱";
+                setTimeout(() => { loadingEl.style.opacity = 0; }, 4000);
             })
             .catch(err => {
                 console.error("無法開啟相機: ", err);
-                loadingEl.innerText = "無法開啟相機，請檢查瀏覽器權限。";
+                loadingEl.innerText = "無法開啟相機，請檢查瀏覽器隱私設定。";
             });
 
         const videoTexture = new THREE.VideoTexture(video);
         videoTexture.minFilter = THREE.LinearFilter;
         videoTexture.magFilter = THREE.LinearFilter;
 
-        // --- 水波紋資料結構 ---
+        // 3. 水波紋資料結構
         const maxRipples = 12;
         const ripples = Array(maxRipples).fill(null).map(() => ({ x: 0, y: 0, age: 0, intensity: 0 }));
         const rippleData = new Float32Array(maxRipples * 4); 
         let rippleIndex = 0;
         let lastX = 0, lastY = 0;
 
-        // --- 加強效果的 Shader 材質 (遮罩定位、複雜度、反差) ---
+        // 4. 強烈液態感、高反差 Fragment Shader
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uVideoTex: { value: videoTexture },
                 uRipples: { value: rippleData },
-                uAspect: { value: window.innerWidth / window.innerHeight },
-                // 鏡子黑色區域在原始 100vh 下的比例位置百分比 (從頂部開始)
-                // 精確測量：y 從大約 13.2% 到 19.8% (黑色橢圓，半徑~0.064)。 x 中心大約在0.5，半徑~0.35。
-                // 轉換為 Shader 的 UV 座標 (y=0 是底部):
-                // 中心 y 大約在 1.0 - (0.132 + 0.198)/2 = 0.835
-                // 半徑 y 大約在 0.064 / 2 * 100vh = ~3.2% 的 UVy。
-                // 硬編碼定位：
-                uCenterMask: { value: new THREE.Vector2(0.5, 0.835) }, // 橢圓形遮罩中心 (UVx, UVy)
-                uMaskRadius: { value: new THREE.Vector2(0.35, 0.032) } // 橢圓形遮罩軸長 (UVx, UVy)
+                uAspect: { value: 1.0 }
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -134,69 +147,59 @@
                 uniform float uAspect;
                 varying vec2 vUv;
 
-                uniform vec2 uCenterMask; // 橢圓形遮罩中心 (UVx, UVy)
-                uniform vec2 uMaskRadius; // 橢圓形遮罩軸長 (UVx, UVy)
-
                 void main() {
                     vec2 uv = vUv;
-                    
-                    // 1. 建立圓形/橢圓形遮罩，與鏡子黑色區域對齊
-                    // 我們將在 Shader 內丟棄遮罩外的像素以節省效能
-                    vec2 scaledUv = (uv - uCenterMask) / uMaskRadius;
-                    float ellDist = length(scaledUv);
-
-                    if (ellDist > 1.0) {
-                        discard; // 丟棄外部像素 (使該區域透明)，讓下方的紫紅色 body 背景顯示出來
-                    }
-
                     vec2 displacedUv = uv;
-                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像修正
+                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像修正，像照鏡子一樣直覺
                     
-                    // 遍歷所有波紋，計算折射，加強複雜度和反差
+                    float shadowHighlight = 0.0;
+                    
+                    // 遍歷波紋計算扭曲與光影調變
                     for(int i = 0; i < 12; i++) {
                         float age = uRipples[i].z;
-                        
                         if (age > 0.0 && age < 1.0) {
                             vec2 center = uRipples[i].xy;
                             
-                            // 確保波紋是正圓形
                             vec2 uvScaled = uv * vec2(uAspect, 1.0);
                             vec2 centerScaled = center * vec2(uAspect, 1.0);
                             
                             float dist = distance(uvScaled, centerScaled);
-                            float maxRadius = age * 0.8; 
+                            float maxRadius = age * 0.7; // 波紋擴散極限
                             
                             if (dist < maxRadius) {
                                 float progress = dist / maxRadius;
                                 
-                                // 增加多層漣漪圈圈
-                                float wave1 = sin((dist - maxRadius) * 45.0);
-                                float wave2 = cos((dist - maxRadius) * 80.0) * 0.5; // 疊加一個更高頻的 cos 波
-                                float wave = wave1 + wave2;
-
-                                // 拉大反差：使用 pow() 並放大
-                                // 原始：float intensity = uRipples[i].w * (1.0 - age) * pow(progress, 3.0);
-                                float intensity = uRipples[i].w * pow( (1.0 - age) * pow(progress, 3.0), 1.5 ) * 2.5;
+                                // 複雜度加強：雙重正弦與餘弦波疊加，創造更細緻的液體漣漪
+                                float wave = sin((dist - maxRadius) * 55.0) * cos((dist - maxRadius) * 25.0);
+                                
+                                // 強度衰減控制 (邊緣與中心淡出)
+                                float intensity = uRipples[i].w * pow(1.0 - age, 1.5) * min(smoothstep(0.0, 0.15, progress), smoothstep(1.0, 0.7, progress));
                                 
                                 vec2 dir = uvScaled - centerScaled;
                                 if (length(dir) > 0.0001) {
-                                    // 將扭曲量加回未縮放的 UV 上
-                                    displacedUv += (normalize(dir) / vec2(uAspect, 1.0)) * wave * intensity * 0.035;
+                                    // 增強扭曲幅度 (0.06)
+                                    float distortion = wave * intensity * 0.06;
+                                    displacedUv += (normalize(dir) / vec2(uAspect, 1.0)) * distortion;
+                                    
+                                    // 【核心修改】拉大明暗反差：根據波峰波谷計算即時的光影反射(Highlight & Shadow)
+                                    shadowHighlight += wave * intensity * 0.5;
                                 }
                             }
                         }
                     }
                     
-                    // 防止 UV 超出邊界
-                    displacedUv = clamp(displacedUv, 0.001, 0.999);
-                    
-                    // 採樣相機紋理
+                    displacedUv = clamp(displacedUv, 0.002, 0.998);
                     vec4 texColor = texture2D(uVideoTex, displacedUv);
                     
-                    // 柔和地裁剪橢圓邊緣
-                    float mask = smoothstep(1.0, 0.95, ellDist); // 用 ellDist 進行柔邊，效果更準確
-                    gl_FragColor = vec4(texColor.rgb, texColor.a * mask); // 使用 mask 來控制透明度
-
+                    vec3 rgb = texColor.rgb;
+                    
+                    // 【核心修改】整體畫面基礎對比度再拉高
+                    rgb = (rgb - 0.5) * 1.25 + 0.5;
+                    
+                    // 注入剛剛計算出來的波紋亮暗面反差
+                    rgb += vec3(shadowHighlight);
+                    
+                    gl_FragColor = vec4(rgb, 1.0);
                 }
             `
         });
@@ -205,107 +208,93 @@
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
 
-        // 建立一個檢查橢圓內外的函數，用於互動
-        function isInsideMirrorEllipse(mx, my) {
-            const x = mx / window.innerWidth;
-            const y = 1.0 - (my / window.innerHeight); // 從底部開始
+        // 5. 互動事件觸發邏輯
+        function triggerRipple(canvasX, canvasY, isClick = false, isGyro = false) {
+            let x = canvasX / canvas.clientWidth;
+            let y = 1.0 - (canvasY / canvas.clientHeight);
 
-            // 使用與 Shader 一致的參數
-            const center = material.uniforms.uCenterMask.value;
-            const radius = material.uniforms.uMaskRadius.value;
-
-            // 橢圓距離公式： (x-cx)^2/a^2 + (y-cy)^2/b^2 <= 1
-            const dx = (x - center.x) / radius.x;
-            const dy = (y - center.y) / radius.y;
-            return (dx * dx + dy * dy) <= 1.0;
-        }
-
-        function spawnRipple(mx, my, isClick = false, isGiro = false) {
-            let x = mx / window.innerWidth;
-            let y = 1.0 - (my / window.innerHeight);
-
-            // 陀螺儀連動的波紋只在橢圓中心觸發，不受滑鼠限制
-            if (isGiro) {
-                const center = material.uniforms.uCenterMask.value;
-                x = center.x;
-                y = center.y;
-            } else if (!isInsideMirrorEllipse(mx, my)) {
-                // 如果是滑鼠互動，且不在橢圓內，則不觸發新波紋
-                return;
+            if (isGyro) {
+                // 陀螺儀觸發時，波紋直接從鏡面正中央擴散
+                x = 0.5;
+                y = 0.5;
             }
-            
+
             const dist = Math.hypot(x - lastX, y - lastY);
-            if (dist > 0.015 || isClick || isGiro) {
+            if (dist > 0.02 || isClick || isGyro) {
                 ripples[rippleIndex] = {
-                    x, 
-                    y, 
-                    age: 0.01, 
-                    intensity: isGiro ? 1.5 : (isClick ? 1.5 : 1.0) 
+                    x,
+                    y,
+                    age: 0.01,
+                    intensity: isGyro ? 1.8 : (isClick ? 1.6 : 1.1) // 增強整體波動能量
                 };
                 rippleIndex = (rippleIndex + 1) % maxRipples;
-                if (!isGiro) { // 陀螺儀波紋不需要紀錄上次位置
+                if (!isGyro) {
                     lastX = x;
                     lastY = y;
                 }
             }
         }
 
-        // --- 桌機滑鼠監聽 ---
-        window.addEventListener('mousemove', (e) => spawnRipple(e.clientX, e.clientY));
-        window.addEventListener('mousedown', (e) => spawnRipple(e.clientX, e.clientY, true));
-        // 手機版手指互動已移除
-
-        // --- 手機陀螺儀 (Gyroscope) 連動 ---
-        // 需要使用者手勢來請求權限
-        let giroAllowed = false;
-        document.body.addEventListener('click', function requestGiroPermission() {
-            if (giroAllowed) return;
-            if (typeof DeviceMotionEvent.requestPermission === 'function') {
-                DeviceMotionEvent.requestPermission()
-                .then(response => {
-                    if (response == 'granted') {
-                        giroAllowed = true;
-                        loadingEl.innerText = "已連動陀螺儀，試著晃動手機...";
-                        setTimeout(() => loadingEl.style.opacity = 0, 1500);
-                        startGiroListener();
-                    }
-                })
-                .catch(console.error)
-            } else {
-                // 不需要請求權限的舊瀏覽器或 Android
-                giroAllowed = true;
-                startGiroListener();
+        // --- 桌機滑鼠監聽（僅在 Canvas 範圍內有效） ---
+        window.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                triggerRipple(e.clientX - rect.left, e.clientY - rect.top, false);
             }
-            document.body.removeEventListener('click', requestGiroPermission);
-        }, { once: true });
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                triggerRipple(e.clientX - rect.left, e.clientY - rect.top, true);
+            }
+        });
+
+        // --- 手機陀螺儀（晃動觸發）與權限請求 ---
+        let gyroActivated = false;
+        window.addEventListener('click', () => {
+            if (gyroActivated) return;
+            
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(response => {
+                        if (response === 'granted') {
+                            initGyroscope();
+                        }
+                    }).catch(console.error);
+            } else {
+                initGyroscope(); // Android 或舊版 iOS 直接啟動
+            }
+            gyroActivated = true;
+        });
 
         let lastShakeTime = 0;
-        function startGiroListener() {
+        let lastAccX = 0, lastAccY = 0;
+
+        function initGyroscope() {
+            loadingEl.style.opacity = 1;
+            loadingEl.innerText = "陀螺儀已連動！搖晃手機試試看 🔮";
+            setTimeout(() => { loadingEl.style.opacity = 0; }, 2000);
+
             window.addEventListener('devicemotion', (e) => {
-                if (!giroAllowed) return;
-                
-                // 獲取加速度和旋轉率
                 const acc = e.accelerationIncludingGravity;
                 if (!acc) return;
 
-                // 計算簡單的“晃動強度”
-                // 我們只關注 x, y 的變化， z 是重力方向。
-                const intensity = Math.abs(acc.x - (acc.lastX || 0)) + Math.abs(acc.y - (acc.lastY || 0));
-                
-                acc.lastX = acc.x;
-                acc.lastY = acc.y;
+                // 計算動態晃動變量
+                const change = Math.abs(acc.x - lastAccX) + Math.abs(acc.y - lastAccY);
+                lastAccX = acc.x;
+                lastAccY = acc.y;
 
                 const now = Date.now();
-                // 如果強度大於閾值，且距離上次晃動有一段時間，則觸發中心波紋
-                if (intensity > 5.0 && now - lastShakeTime > 350) { 
-                    spawnRipple(0, 0, false, true); // (0,0) 位置對陀螺儀波紋沒意義
+                // 晃動過關且冷卻時間超過 300 毫秒，在中央炸開一道巨型漣漪
+                if (change > 7.5 && (now - lastShakeTime > 300)) {
+                    triggerRipple(0, 0, false, true);
                     lastShakeTime = now;
                 }
             });
         }
 
-
-        // --- Render Loop ---
+        // 6. 動態渲染循環 (Render Loop)
         const clock = new THREE.Clock();
 
         function animate() {
@@ -314,10 +303,8 @@
             
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    ripples[i].age += delta * 0.65; // 控制速度
-                    if (ripples[i].age >= 1.0) {
-                        ripples[i].age = 0; 
-                    }
+                    ripples[i].age += delta * 0.75; // 稍微加快擴散速度，感覺更靈動
+                    if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
                 rippleData[i*4 + 1] = ripples[i].y;
@@ -329,13 +316,10 @@
             renderer.render(scene, camera);
         }
         
+        // 初始與調整視窗大小
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
         animate();
-
-        // --- RWD 縮放修正 ---
-        window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            material.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
-        });
     </script>
 </body>
 </html>
