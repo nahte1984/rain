@@ -148,27 +148,29 @@
         videoTexture.minFilter = THREE.LinearFilter;
         videoTexture.magFilter = THREE.LinearFilter;
 
-        // 3. 滑鼠局部漣漪快取 (手機陀螺儀將統一使用此系統)
+        // 3. 統一流體矩陣（手機、滑鼠、背景自動漣漪共用）
         const maxRipples = 6;
         const ripples = Array(maxRipples).fill(null).map(() => ({ x: 0, y: 0, age: 0, intensity: 0 }));
         const rippleData = new Float32Array(maxRipples * 4); 
         let rippleIndex = 0;
         let lastX = 0, lastY = 0;
 
-        // 【核心修正】手機版虛擬游標與物理狀態暫存
-        let virtualGyroCursor = { x: 0.5, y: 0.5 }; // 虛擬游標位置 (0~1)
+        // 手機版虛擬游標與狀態
+        let virtualGyroCursor = { x: 0.5, y: 0.5 };
         let lastVirtualCursorX = 0.5, lastVirtualCursorY = 0.5;
-        let lastShakeTimeTrigger = 0; // 用於限制觸發頻率
-        let lastAccX = 0, lastAccY = 0; // 用於計算靈敏度
+        let lastShakeTimeTrigger = 0;
+        let lastAccX = 0, lastAccY = 0;
 
-        // 4. 流體美學著色器 (獨佔動態多中心演算法)
+        // 【核心修正】背景自動觸發流體系統
+        let lastAutoRippleTime = 0;
+
+        // 4. 連續流體動態著色器 (更大幅度、和諧餘波演算)
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uVideoTex: { value: videoTexture },
                 uRipples: { value: rippleData },
                 uCanvasAspect: { value: 1.0 },
                 uVideoAspect: { value: 1.777 }
-                // 【核心修正】彻底移除單次大波紋相關的舊 Uniforms (uGyroAge, uGyroIntensity, uGyroCenter)
             },
             vertexShader: `
                 varying vec2 vUv;
@@ -189,9 +191,7 @@
                     vec2 displacedUv = uv;
                     float shadowHighlight = 0.0;
                     
-                    // 【核心修正】徹底移除舊的大水波 Shader 邏輯。
-
-                    // 【統一系統：桌機版滑鼠微波 / 新手機版陀螺儀虛擬游標微波】
+                    // 【統一系統：手機虛擬游標 / 背景自動流動】
                     for(int i = 0; i < 6; i++) {
                         float age = uRipples[i].z;
                         if (age > 0.0 && age < 1.0) {
@@ -199,27 +199,30 @@
                             vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
                             vec2 centerScaled = center * vec2(uCanvasAspect, 1.0);
                             float dist = distance(uvScaled, centerScaled);
-                            float maxRadius = age * 0.6;
+                            float maxRadius = age * 0.7; // 稍微擴大最大半徑，呈現慢速蔓延
                             
                             if (dist < maxRadius) {
                                 float progress = dist / maxRadius;
                                 float wave = sin((dist - maxRadius) * 35.0);
-                                float intensity = uRipples[i].w * pow(1.0 - age, 1.5) * smoothstep(0.0, 0.2, progress);
+                                
+                                // 自然的水體老化衰減，指數下降更沉穩
+                                float intensity = uRipples[i].w * pow(1.0 - age, 1.8) * smoothstep(0.0, 0.2, progress);
                                 
                                 vec2 dir = uvScaled - centerScaled;
                                 if (length(dir) > 0.0001) {
-                                    // 【核心修正】微調亮暗反差（0.012 -> 0.015, 0.025 -> 0.035），提高整體靈敏度下的視覺清晰度
-                                    displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.015;
-                                    shadowHighlight += wave * intensity * 0.035;
+                                    // 【核心修正】幅度大幅增加（0.015 -> 0.055），呈现激盪的大幅度魔幻拉扯
+                                    displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * wave * intensity * 0.055;
+                                    // 【核心修正】縮小光影反差，呈現有機水質柔和感，避免死黑
+                                    shadowHighlight += wave * intensity * 0.065;
                                 }
                             }
                         }
                     }
                     
                     displacedUv = clamp(displacedUv, 0.002, 0.998);
-                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像修正
+                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像
                     
-                    // 著色器內置不變形 Object-Fit Cover 演算法
+                    // 內置不變形 Object-Fit Cover
                     vec2 finalVideoUv = displacedUv;
                     if (uCanvasAspect > uVideoAspect) {
                         float ratio = uVideoAspect / uCanvasAspect;
@@ -253,7 +256,7 @@
             }
         }
 
-        // --- 桌機滑鼠監聽（僅在 Canvas 內部） ---
+        // --- 滑鼠監聽 ---
         window.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
@@ -268,7 +271,7 @@
             }
         });
 
-        // --- 授權流程與非同步綁定 ---
+        // --- 授權流程 ---
         startBtn.addEventListener('click', async () => {
             startBtn.style.display = 'none';
             statusTip.innerText = "正在請求相機權限...";
@@ -299,7 +302,7 @@
             }
         });
 
-        // --- 【核心修正】陀螺儀動態捕捉：數據像滑鼠游標一樣游移，觸發普通波紋 ---
+        // --- 陀螺儀動態捕捉：數據像滑鼠游標一樣游移，觸發普通波紋 ---
         function initGyroscope() {
             window.addEventListener('devicemotion', (e) => {
                 const acc = e.accelerationIncludingGravity;
@@ -315,69 +318,43 @@
 
                 const now = Date.now();
                 
-                // 【核心修正 A: 映射物理偏移】根據手機的傾斜向量（加速度），計算虛擬游標在鏡面中的座標偏移。
-                // 閥值微調系數控制靈敏度。我們將 delta 映射到合理的 UV 空間 (0.15~0.85 區間)。
-                let offsetX = THREE.MathUtils.clamp(acc.x * -0.045, -0.35, 0.35); // `-9.8` -> `0.44`左偏, `+9.8` -> `-0.44`右偏
-                let offsetY = THREE.MathUtils.clamp(acc.y * -0.045, -0.35, 0.35); // 調整系數以控制映射範圍
-                
-                // 手機往右下偏移時，x = -deltaX * 系數, y = -deltaY * 系數。
-                // 當手機往右下偏，起點在右下處。
-                // Y 軸在 WebGL 是向上的。
+                // 映射物理偏移：根據手機的傾斜向量（加速度），絲滑地插值計算虛擬游標目標。
+                targetCenterX = 0.5 - THREE.MathUtils.clamp(acc.x * 0.042, -0.38, 0.38);
+                targetCenterY = 0.5 - THREE.MathUtils.clamp(acc.y * 0.042, -0.38, 0.38);
 
-                // 【核心修正 B: 模擬滑鼠移動】更新虛擬游標位置，並使用插值使其絲滑游移。
-                // 當手機往右下偏，acc.x 減小，offsetX 增加。 acc.y 減小，offsetY 增加。這不對。
+                virtualGyroCursor.x = virtualGyroCursor.x * 0.84 + targetCenterX * 0.16;
+                virtualGyroCursor.y = virtualGyroCursor.y * 0.84 + targetCenterY * 0.16;
 
-                // 用戶的描述提供了明確的修復方向：
-                // [理想效果]：陀螺儀數據 (加速度/重力) -> 模擬滑鼠游標位置。
-                // 當手機往右下偏，起點在右下處。這意味著偏移是正的。
-
-                let mapAccToOffset = (val, maxAcc, maxOffset) => {
-                    return THREE.MathUtils.clamp((val / maxAcc) * maxOffset, -maxOffset, maxOffset);
-                };
-
-                let curTargetOffsetX = mapAccToOffset(acc.x, 9.8, 0.38); // `-9.8` (g) -> `-0.38`, `+9.8` (g) -> `+0.38`
-                let curTargetOffsetY = mapAccToOffset(acc.y + 9.8, 19.6, 0.38) - 0.19; // 手機垂直時向下偏 (`-9.8`->`-0.19`), 仰角向上 ( `+9.8`->`+0.19`)
-
-                virtualGyroCursor.x = virtualGyroCursor.x * 0.82 + (0.5 + curTargetOffsetX) * 0.18; // 絲滑插值
-                virtualGyroCursor.y = virtualGyroCursor.y * 0.82 + (0.5 + curTargetOffsetY) * 0.18;
-
-                // 【核心修正 C: 超高靈敏度觸發 普通波紋】
-                // 為了用戶說的「數據就像滑鼠游標」，我們使用移動距離來觸發普通波紋。不需要 `uGyroIntensity` 全局變量。
+                // 超高靈敏度觸發 普通波紋（用游標滑動距離觸發）
                 const distMoved = Math.hypot(virtualGyroCursor.x - lastVirtualCursorX, virtualGyroCursor.y - lastVirtualCursorY);
                 lastVirtualCursorX = virtualGyroCursor.x;
                 lastVirtualCursorY = virtualGyroCursor.y;
 
-                // 強度基於 `acc.x/y` 的變化率。
-                // 如果移動距離夠大，就觸發一個普通的 ripple。強度可以基於移動速度。
-                // 我們統一使用一個波紋系統，動態完美自然！
-
-                if (distMoved > 0.012 && (now - lastShakeTimeTrigger > 50)) { // 增加一個冷卻時間
-                    // 映射虛擬游標到 Canvas 座標 (觸發 `triggerMouseRipple`)
+                if (distMoved > 0.008 && (now - lastShakeTimeTrigger > 50)) { 
                     const rect = canvas.getBoundingClientRect();
                     const canvasX = virtualGyroCursor.x * rect.width;
                     const canvasY = (1.0 - virtualGyroCursor.y) * rect.height; // Y 軸翻轉
 
-                    // 強度基於速度和累積變化。用戶要求靈敏，我應該確保強度足夠。
-                    // 靈敏度系數：變化越大強度越高。
-                    const intensity = 0.8 + change * 0.18;
-
+                    const intensity = 0.9 + change * 0.15; // 映射晃動變化率到波紋強度
                     triggerMouseRipple(canvasX, canvasY, intensity);
                     lastShakeTimeTrigger = now;
                 }
             });
         }
 
-        // 6. 核心排程循環
+        // 6. 核心排程循環 (物理模擬循環)
         const clock = new THREE.Clock();
+        let targetCenterX = 0.5, targetCenterY = 0.5; // 手機游標插值目標
 
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
+            const now = clock.getElapsedTime() * 1000; // 使用 clocks 的時間，防止瀏覽器切換標籤導致計時器異常
             
-            // 更新滑鼠 / 手機虛擬游標漣漪消逝速度 (加速至 1.45，清澈水速)
+            // 【核心修正】更新滑鼠 / 手機虛擬游標 /背景自動漣漪消逝速度 (從 1.45 大幅下修至 0.65，使水波更優雅悠長)
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
-                    ripples[i].age += delta * 1.45; 
+                    ripples[i].age += delta * 0.65; // 調慢老化速度，呈現沉穩體感
                     if (ripples[i].age >= 1.0) ripples[i].age = 0; 
                 }
                 rippleData[i*4 + 0] = ripples[i].x;
@@ -386,7 +363,18 @@
                 rippleData[i*4 + 3] = ripples[i].intensity;
             }
             
-            // 【核心修正】彻底移除舊的大水波更新邏輯。
+            // 【核心修正】和諧背景自動波紋有機觸發器
+            // 使用 clock 的時間戳，約 1.2 至 2.0 秒隨機自動泛起一個微弱波紋
+            if (now - lastAutoRippleTime > (1200 + Math.random() * 800)) {
+                // 選取鏡面範圍內的隨機座標 (0.3 ~ 0.7 橢圓區間內)
+                const randX = THREE.MathUtils.randFloat(0.35, 0.65);
+                const randY = THREE.MathUtils.randFloat(0.35, 0.65);
+                
+                // 強度極淡（0.3），受到新的緩慢速度與大幅度設定影響，自然泛起悠長餘韻
+                ripples[rippleIndex] = { x: randX, y: randY, age: 0.01, intensity: 0.3 };
+                rippleIndex = (rippleIndex + 1) % maxRipples;
+                lastAutoRippleTime = now;
+            }
 
             material.uniforms.uRipples.value = rippleData;
             renderer.render(scene, camera);
