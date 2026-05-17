@@ -8,7 +8,7 @@
         html, body {
             margin: 0;
             padding: 0;
-            background-color: #65067b; /* 統一魔幻紫背景 */
+            background-color: #65067b; /* 統一魔幻紫大背景 */
             width: 100%;
             height: 100%;
             overflow: hidden;
@@ -22,7 +22,7 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        /* 【核心修正】高度由 100vh 縮小至 93vh，預留安全邊距，防止上下雕花被裁切 */
+        /* 預留 93vh 安全邊距，防止上下雕花被手機路徑列裁切 */
         #mirror-wrapper {
             position: relative;
             height: 93vh;
@@ -155,16 +155,16 @@
         let rippleIndex = 0;
         let lastX = 0, lastY = 0;
 
-        // 4. 流體美學著色器 (動態多中心巨浪演算法)
+        // 4. 連續流體動態著色器 (更密、更慢、不間斷演算法)
         const material = new THREE.ShaderMaterial({
             uniforms: {
                 uVideoTex: { value: videoTexture },
                 uRipples: { value: rippleData },
                 uCanvasAspect: { value: 1.0 },
                 uVideoAspect: { value: 1.777 },
-                uGyroAge: { value: 0.0 },
+                // 升級：連續流體 Uniforms 矩陣
+                uGyroTime: { value: 0.0 },
                 uGyroIntensity: { value: 0.0 },
-                // 【核心修正】新增大水波的動態出發點中心控管
                 uGyroCenter: { value: new THREE.Vector2(0.5, 0.5) }
             },
             vertexShader: `
@@ -179,9 +179,9 @@
                 uniform vec4 uRipples[6]; 
                 uniform float uCanvasAspect;
                 uniform float uVideoAspect;
-                uniform float uGyroAge;
+                uniform float uGyroTime;
                 uniform float uGyroIntensity;
-                uniform vec2 uGyroCenter; // 動態陀螺儀定位中心
+                uniform vec2 uGyroCenter; 
                 varying vec2 vUv;
 
                 void main() {
@@ -189,27 +189,26 @@
                     vec2 displacedUv = uv;
                     float shadowHighlight = 0.0;
                     
-                    // 【A. 陀螺儀微幅晃動：動態定點全鏡面巨浪】
-                    if (uGyroAge > 0.0 && uGyroAge < 1.0) {
-                        // 使用即時傳入的動態偏移中心計算距離
+                    // 【A. 陀螺儀：高密度、慢速連續流體大水波】
+                    if (uGyroIntensity > 0.0) {
                         vec2 uvScaled = uv * vec2(uCanvasAspect, 1.0);
                         vec2 gyroCenterScaled = uGyroCenter * vec2(uCanvasAspect, 1.0);
                         float dist = distance(uvScaled, gyroCenterScaled);
                         
-                        // 多層正餘弦疊加，創造出極佳的覆蓋型漣漪與交錯餘波
-                        float mainWave = sin(dist * 12.0 - uGyroAge * 24.0);
-                        float harmonicWave = cos(dist * 22.0 - uGyroAge * 12.0) * 0.35;
+                        // 【核心修正】密度大幅加強（58.0 / 96.0），且時間常數流速變慢，水波深沉而綿密
+                        float mainWave = sin(dist * 58.0 - uGyroTime * 1.2);
+                        float harmonicWave = cos(dist * 96.0 - uGyroTime * 0.7) * 0.4;
                         float totalWave = mainWave + harmonicWave;
                         
-                        // 自然的水體能量指數衰減
-                        float decay = pow(1.0 - uGyroAge, 1.6);
-                        float waveIntensity = uGyroIntensity * decay;
+                        // 隨著往外擴散，能量自然呈指數型態柔和衰減，避免死黑
+                        float distanceDecay = exp(-dist * 1.8);
+                        float waveFinal = totalWave * uGyroIntensity * distanceDecay;
                         
                         vec2 dir = uvScaled - gyroCenterScaled;
                         if (length(dir) > 0.0001) {
-                            // 微幅優雅拉扯（0.018），收斂高反差死黑（0.05），視覺極致絲滑自然
-                            displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * totalWave * waveIntensity * 0.018;
-                            shadowHighlight += totalWave * waveIntensity * 0.05;
+                            // 精緻微調拉扯幅度與極淡光影
+                            displacedUv += (normalize(dir) / vec2(uCanvasAspect, 1.0)) * waveFinal * 0.009;
+                            shadowHighlight += waveFinal * 0.035;
                         }
                     }
                     
@@ -238,9 +237,9 @@
                     }
                     
                     displacedUv = clamp(displacedUv, 0.002, 0.998);
-                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像修正
+                    displacedUv.x = 1.0 - displacedUv.x; // 鏡像
                     
-                    // 著色器內置不變形 Object-Fit Cover 演算法
+                    // 內置不變形 Object-Fit Cover
                     vec2 finalVideoUv = displacedUv;
                     if (uCanvasAspect > uVideoAspect) {
                         float ratio = uVideoAspect / uCanvasAspect;
@@ -289,7 +288,7 @@
             }
         });
 
-        // --- 授權流程與非同步綁定 ---
+        // --- 授權流程 ---
         startBtn.addEventListener('click', async () => {
             startBtn.style.display = 'none';
             statusTip.innerText = "正在請求相機權限...";
@@ -320,16 +319,15 @@
             }
         });
 
-        // --- 陀螺儀動態捕捉（【核心修正】高靈敏、動態偏移起點） ---
-        let lastShakeTime = 0;
+        // --- 陀螺儀動態捕捉（【核心修正】超高靈敏度持續注入 + 流體波動中心滑動） ---
         let lastAccX = 0, lastAccY = 0;
+        let targetCenterX = 0.5, targetCenterY = 0.5;
 
         function initGyroscope() {
             window.addEventListener('devicemotion', (e) => {
                 const acc = e.accelerationIncludingGravity;
                 if (!acc) return;
 
-                // 即時位移向量差
                 const deltaX = acc.x - lastAccX;
                 const deltaY = acc.y - lastAccY;
                 const change = Math.abs(deltaX) + Math.abs(deltaY);
@@ -337,34 +335,43 @@
                 lastAccX = acc.x;
                 lastAccY = acc.y;
 
-                const now = Date.now();
-                
-                // 【核心修正】閥值從 6.0 降至 1.1，冷卻縮短至 180ms，微幅移動即刻觸發
-                if (change > 1.1 && (now - lastShakeTime > 180)) {
+                // 【核心修正】極度靈敏門檻（0.04），手部只要呼吸微動就能持續積累水波能量
+                if (change > 0.04) {
+                    let currentInt = material.uniforms.uGyroIntensity.value;
+                    // 持續累積能量，上限設為 1.4 防止畫面過度拉扯扭曲
+                    material.uniforms.uGyroIntensity.value = Math.min(currentInt + change * 0.12, 1.4);
                     
-                    // 【核心修正】根據加速度的方向，動態計算波紋在鏡面中的起源座標 (x, y 都限制在合理橢圓區間內)
-                    // 當手機往右下偏，加速度方向會反映在 delta 上，我們將其映射到 0.15~0.85 的 UV 空間內
-                    let offsetX = THREE.MathUtils.clamp(deltaX * 0.18, -0.35, 0.35);
-                    let offsetY = THREE.MathUtils.clamp(deltaY * 0.18, -0.35, 0.35);
-                    
-                    // 傳遞動態中心給 Shader (由於 WebGL Y軸向上，視訊方向作對應正負號調整)
-                    material.uniforms.uGyroCenter.value.set(0.5 - offsetX, 0.5 - offsetY);
-                    
-                    material.uniforms.uGyroAge.value = 0.01; 
-                    material.uniforms.uGyroIntensity.value = 1.2; 
-                    lastShakeTime = now;
+                    // 【核心修正】根據傾斜偏移向量，動態計算波源的核心目標座標
+                    targetCenterX = 0.5 - THREE.MathUtils.clamp(deltaX * 0.22, -0.38, 0.38);
+                    targetCenterY = 0.5 - THREE.MathUtils.clamp(deltaY * 0.22, -0.38, 0.38);
                 }
             });
         }
 
-        // 6. 渲染循環
+        // 6. 渲染與物理模擬循環
         const clock = new THREE.Clock();
 
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
             
-            // 更新滑鼠漣漪消逝速度 (【核心修正】加速至 1.45，回復清澈水速)
+            // A. 連續流體時間演進（控制波動前進的震動速度，數值調小 = 變慢）
+            material.uniforms.uGyroTime.value += delta * 2.2; 
+            
+            // 【核心修正】延長生命週期：能量衰減系數調低，水波在靜止後能持續自然飄盪、消逝得極慢
+            if (material.uniforms.uGyroIntensity.value > 0.0) {
+                material.uniforms.uGyroIntensity.value *= Math.exp(-0.65 * delta); 
+                if (material.uniforms.uGyroIntensity.value < 0.001) {
+                    material.uniforms.uGyroIntensity.value = 0.0;
+                }
+            }
+
+            // 【核心修正】流體中心平滑插值（Lerp）：讓波源核心隨著手機動能絲滑移位，不產生瞬移死結
+            let curCenter = material.uniforms.uGyroCenter.value;
+            curCenter.x = curCenter.x * 0.88 + targetCenterX * 0.12;
+            curCenter.y = curCenter.y * 0.88 + targetCenterY * 0.12;
+            
+            // B. 滑鼠局部漣漪更新
             for(let i = 0; i < maxRipples; i++) {
                 if (ripples[i].age > 0) {
                     ripples[i].age += delta * 1.45; 
@@ -376,20 +383,11 @@
                 rippleData[i*4 + 3] = ripples[i].intensity;
             }
             
-            // 更新手機搖晃全局巨浪消逝速度 (【核心修正】加速至 1.45，清脆自然)
-            if (material.uniforms.uGyroAge.value > 0.0) {
-                material.uniforms.uGyroAge.value += delta * 1.45; 
-                if (material.uniforms.uGyroAge.value >= 1.0) {
-                    material.uniforms.uGyroAge.value = 0.0;
-                    material.uniforms.uGyroIntensity.value = 0.0;
-                }
-            }
-            
             material.uniforms.uRipples.value = rippleData;
             renderer.render(scene, camera);
         }
 
-        // 徹底阻斷瀏覽器原生手勢
+        // 阻斷原生瀏覽器手勢
         document.addEventListener('gesturestart', (e) => e.preventDefault());
         document.addEventListener('touchstart', (e) => {
             if (e.touches.length > 1) e.preventDefault();
