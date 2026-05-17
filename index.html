@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcam Liquid Ripple Effect</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: sans-serif;
+            font-size: 1.2rem;
+            pointer-events: none;
+            transition: opacity 0.5s;
+        }
+    </style>
+    <!-- 引入 Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="loading">請允許相機權限以啟動水波紋...</div>
+    <canvas id="webgl-canvas"></canvas>
+
+    <script>
+        const loadingEl = document.getElementById('loading');
+        
+        // 1. 初始化 Three.js 場景與正交相機（用來滿版呈現 2D 畫面）
+        const scene = new THREE.Scene();
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        // 2. 建立隱藏的 Video 標籤來撈取 Webcam
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+
+        // 請求相機權限
+        navigator.mediaDevices.getUserMedia({ video: { width: {理想: 1280}, height: {理想: 720} } })
+            .then(stream => {
+                video.srcObject = stream;
+                video.play();
+                loadingEl.style.opacity = 0; // 隱藏提示
+            })
+            .catch(err => {
+                console.error("無法開啟相機: ", err);
+                loadingEl.innerText = "無法開啟相機，請檢查瀏覽器權限。";
+            });
+
+        // 將 Video 轉換為 Three.js 的材質
+        const videoTexture = new THREE.VideoTexture(video);
+        videoTexture.minFilter = THREE.LinearFilter;
+        videoTexture.magFilter = THREE.LinearFilter;
+
+        // 3. 水波紋資料結構 (最多支援同時存在 12 個波紋)
+        const maxRipples = 12;
+        const ripples = Array(maxRipples).fill(null).map(() => ({ x: 0, y: 0, age: 0, intensity: 0 }));
+        const rippleData = new Float32Array(maxRipples * 4); // 傳給 GPU 的平鋪陣列 (x, y, age, intensity)
+        let rippleIndex = 0;
+        let lastX = 0, lastY = 0;
+
+        // 4. 客製化 Shader 材質
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                uVideoTex: { value: videoTexture },
+                uRipples: { value: rippleData },
+                uAspect: { value: window.innerWidth / window.innerHeight }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D uVideoTex;
+                uniform vec4 uRipples[12]; // x, y = 座標, z = 年齡(0~1), w = 強度
+                uniform float uAspect;
+                varying vec2 vUv;
+
+                void main() {
+                    vec2 uv = vUv;
+                    vec2 displacedUv = uv;
+                    
+                    // 遍歷所有波紋，計算對當前像素的折射拉扯
+                    for(int i = 0; i < 12; i++) {
+                        float age = uRipples[i].z;
+                        
+                        if (age > 0.0 && age < 1.0) {
+                            vec2 center = uRipples[i].xy;
+                            
+                            // 修正螢幕寬高比，確保波紋是正圓形而非橢圓
+                            vec2 uvScaled = uv * vec2(uAspect, 1.0);
+                            vec2 centerScaled = center * vec2(uAspect, 1.0);
+                            
+                            float dist = distance(uvScaled, centerScaled);
+                            float maxRadius = age * 0.8; // 波紋擴散最大半徑
+                            
+                            if (dist < maxRadius) {
+                                float progress = dist / maxRadius;
+                                
+                                // 利用 sin 函數製造多層漣漪圈圈
+                                float wave = sin((dist - maxRadius) * 45.0);
+                                
+                                // 隨著時間(age)衰減，且越靠近波紋中心或邊緣越淡
+                                float intensity = uRipples[i].w * (1.0 - age) * pow(progress, 3.0);
+                                
+                                vec2 dir = uvScaled - centerScaled;
+                                if (length(dir) > 0.0001) {
+                                    // 將扭曲量加回未縮放的 UV 上
+                                    displacedUv += (normalize(dir) / vec2(uAspect, 1.0)) * wave * intensity * 0.025;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 鏡像修正 (1.0 - uv.x)：讓視訊畫面像照鏡子一樣自然
+                    vec2 finalUv = vec2(1.0 - displacedUv.x, displacedUv.y);
+                    
+                    // 防止 UV 超出邊界產生的鄰近像素拉伸
+                    finalUv = clamp(finalUv, 0.001, 0.999);
+                    
+                    gl_FragColor = texture2D(uVideoTex, finalUv);
+                }
+            `
+        });
+
+        // 建立滿版平面並加入場景
+        const geometry = new THREE.PlaneGeometry(2, 2);
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+
+        // 5. 滑鼠與觸控事件監聽
+        function spawnRipple(mx, my, isClick = false) {
+            const x = mx / window.innerWidth;
+            const y = 1.0 - (my / window.innerHeight); // WebGL 的 Y 軸在下方是 0，畫面上方是 1
+            
+            const dist = Math.hypot(x - lastX, y - lastY);
+            // 移動距離夠大，或是直接點擊時才觸發新波紋，防止資料塞車
+            if (dist > 0.015 || isClick) {
+                ripples[rippleIndex] = {
+                    x, 
+                    y, 
+                    age: 0.01, 
+                    intensity: isClick ? 1.5 : 1.0 // 點擊的波紋比較強烈
+                };
+                rippleIndex = (rippleIndex + 1) % maxRipples;
+                lastX = x;
+                lastY = y;
+            }
+        }
+
+        window.addEventListener('mousemove', (e) => spawnRipple(e.clientX, e.clientY));
+        window.addEventListener('mousedown', (e) => spawnRipple(e.clientX, e.clientY, true));
+        window.addEventListener('touchmove', (e) => {
+            if(e.touches.length > 0) {
+                spawnRipple(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+
+        // 6. 動態渲染循環 (Render Loop)
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            
+            // 更新波紋狀態並打包進 Float32Array
+            for(let i = 0; i < maxRipples; i++) {
+                if (ripples[i].age > 0) {
+                    ripples[i].age += delta * 0.65; // 控制波紋擴散的速度
+                    if (ripples[i].age >= 1.0) {
+                        ripples[i].age = 0; // 壽命結束，重置
+                    }
+                }
+                // 平鋪寫入陣列送給 Shader uniform
+                rippleData[i*4 + 0] = ripples[i].x;
+                rippleData[i*4 + 1] = ripples[i].y;
+                rippleData[i*4 + 2] = ripples[i].age;
+                rippleData[i*4 + 3] = ripples[i].intensity;
+            }
+            
+            material.uniforms.uRipples.value = rippleData;
+            renderer.render(scene, camera);
+        }
+        
+        animate();
+
+        // 7. 視窗 RWD 縮放處理
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            material.uniforms.uAspect.value = window.innerWidth / window.innerHeight;
+        });
+    </script>
+</body>
+</html>
